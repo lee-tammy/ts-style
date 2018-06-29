@@ -20,6 +20,7 @@ import {createProgram} from './lint';
 
 // Exported for testing purposes.
 export const clangFormat = require('clang-format');
+export const xml2js = require('xml2js');
 
 const BASE_ARGS_FILE = ['-style=file'];
 const BASE_ARGS_INLINE =
@@ -33,6 +34,7 @@ const BASE_ARGS_INLINE =
  */
 export async function format(
     options: Options, files: string[] = [], fix = false): Promise<boolean> {
+    
   if (options.dryRun && fix) {
     options.logger.log('format: skipping auto fix since --dry-run was passed');
     fix = false;
@@ -95,6 +97,8 @@ function fixFormat(srcFiles: string[], baseArgs: string[]): Promise<boolean> {
 function checkFormat(srcFiles: string[], baseArgs: string[]): Promise<boolean> {
   return new Promise<boolean>((resolve, reject) => {
     let output = '';
+    let arrOffset: number[] = [];
+    let arrOffsetLength: number[] = [];
     const args = baseArgs.concat(['-output-replacements-xml'], srcFiles);
     const out = clangFormat
                     .spawnClangFormat(
@@ -105,13 +109,38 @@ function checkFormat(srcFiles: string[], baseArgs: string[]): Promise<boolean> {
                           }
                         },
                         ['ignore', 'pipe', process.stderr])
-                    .stdout;
+                    .stdout; 
     out.setEncoding('utf8');
     out.on('data', (data: Buffer) => {
       output += data;
+
+      const parser = new xml2js.Parser();
+      parser.parseString(output, function(err: any, result: any){
+        if(err){
+          throw err;
+        }
+        let i = 0;
+        while(result['replacements']['replacement'][i] != undefined){
+          arrOffset[i] = result['replacements']['replacement'][i].$.offset;
+          arrOffsetLength[i] = result['replacements']['replacement'][i].$.length;
+          i++;
+        }
+        
+      });
+
     });
+    
+    
     out.on('end', () => {
       resolve(output.indexOf('<replacement ') === -1 ? true : false);
     });
   });
+}
+
+function findFormatErrorLines(offsets: number[], length: number[]){
+  fs.read
+}
+
+function printFormatErrorLines(){
+
 }
