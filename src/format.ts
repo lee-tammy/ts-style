@@ -126,7 +126,12 @@ function checkFormat(srcFiles: string[], baseArgs: string[]): Promise<boolean> {
   });
 }
 
-
+/**
+ * Parses through xml string for the replacement offsets and lengths. Uses those values
+ * to locate the formatting error lines.
+ * 
+ * @param output xml string 
+ */
 async function findFormatErrorLines(output: string){
   const parser = new xml2js.Parser();
   let arrOffset: number[] = [];
@@ -151,7 +156,10 @@ async function findFormatErrorLines(output: string){
   let lines: string[] = [];
   const read = promisify(fs.readFile);
   // *******TODO: How many files am I allowed to check*******
-  let data = await read(process.argv[3], 'utf8');
+  let argNum = 3;
+  let file = process.argv[argNum];
+
+  let data = await read(file, 'utf8');
   lines = data.split('\n');
 
   let lineCount = 0;
@@ -159,26 +167,35 @@ async function findFormatErrorLines(output: string){
   for(let i = 0; i < arrOffset.length;){
     let offsetCount = arrOffset[i];
     if(offsetCount < prevCharCount + +lines[lineCount].length){
-      printFormatErrLines(lines[lineCount], arrOffset[i] - +prevCharCount, arrOffsetLength[i]);
+      printFormatErrLines(lines[lineCount], arrOffset[i] - +prevCharCount, 
+          arrOffsetLength[i], lineCount, file);
       i++;  
     }else{
       prevCharCount += +lines[lineCount].length + +1;
       lineCount++;
     }
-    
   }
 
 }
 
-function printFormatErrLines(line: string, position: number, length: number){
-  let header = process.argv[3] + ":" + "#";
-  let spacing = header.length + 1;
-  let empty = ' ';
+/**
+ * Prints the line with formatting issues.
+ * 
+ * @param line string in file with formatting issue
+ * @param pos position of the start of formatting issue
+ * @param length the length of the formatting issue
+ * @param lineNumber 
+ * @param file the file where formatting issue is
+ */
+function printFormatErrLines(line: string, pos: number, length: number, 
+    lineNumber: number, file: string){
+  let header = file + ":" + lineNumber;
+  let spacing = header.length + 3;
   process.stdout.write(header);
-  console.log(" " + line);
-  process.stdout.write(empty.repeat(spacing));
+  console.log(' '.repeat(3) + line);
+  process.stdout.write(' '.repeat(spacing));
   for(let i = 0; i < line.length; i++){
-    if(i >= position && i < (+position + +length)){
+    if(i >= pos && i < (+pos + +length)){
       process.stdout.write("^");
     }else{
       process.stdout.write("-");
