@@ -17,6 +17,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {Options} from './cli';
 import {createProgram} from './lint';
+import { promisify } from 'util';
 
 // Exported for testing purposes.
 export const clangFormat = require('clang-format');
@@ -112,35 +113,70 @@ function checkFormat(srcFiles: string[], baseArgs: string[]): Promise<boolean> {
                     .stdout; 
     out.setEncoding('utf8');
     out.on('data', (data: Buffer) => {
-      output += data;
-
-      const parser = new xml2js.Parser();
-      parser.parseString(output, function(err: any, result: any){
-        if(err){
-          throw err;
-        }
-        let i = 0;
-        while(result['replacements']['replacement'][i] != undefined){
-          arrOffset[i] = result['replacements']['replacement'][i].$.offset;
-          arrOffsetLength[i] = result['replacements']['replacement'][i].$.length;
-          i++;
-        }
-        
-      });
-
+      output += data;          
     });
     
-    
     out.on('end', () => {
-      resolve(output.indexOf('<replacement ') === -1 ? true : false);
+      findFormatErrorLines(output)
+        .then(() => {
+          resolve(output.indexOf('<replacement ') === -1 ? true : false)
+        });
     });
   });
 }
 
-function findFormatErrorLines(offsets: number[], length: number[]){
-  fs.read
+
+async function findFormatErrorLines(output: string){
+  const parser = new xml2js.Parser();
+  let arrOffset: number[] = [];
+  let arrOffsetLength: number[] = [];
+
+  parser.parseString(output, function(err: any, xmlOutput: any){
+    if(err){
+      throw err;
+    }
+
+    if(xmlOutput['replacements']['replacement'] == undefined){
+      return;
+    }
+    let i = 0;
+    while(xmlOutput['replacements']['replacement'][i] != undefined){
+      arrOffset[i] = xmlOutput['replacements']['replacement'][i].$.offset;
+      arrOffsetLength[i] = xmlOutput['replacements']['replacement'][i].$.length;
+      i++;
+        
+    }  
+  });
+
+  let buffer = '';
+  let lines: string[] = [];
+  const read = promisify(fs.readFile);
+  let data = await read(process.argv[3], 'utf8');
+  lines = data.split('\n');
+
+  let count = 0;
+  let arrCount = 0;
+  let charCount = 0;
+  let prevCharCount = 0;
+  for(let i = 0; i < lines.length; i++){
+    count += +arrOffset[arrCount];
+    charCount += +lines[i].length;
+    if(count < charCount){
+      printFormatErrLines(lines[i], arrOffset[arrCount] - +prevCharCount, arrOffsetLength[arrCount]);
+      arrCount++; 
+    }
+    prevCharCount += +lines[i].length + +1;
+  }
 }
 
-function printFormatErrorLines(){
-
+function printFormatErrLines(line: string, position: number, length: number){
+  console.log(line);
+  for(let i = 0; i < line.length; i++){
+    if(i >= position && i < (+position + +length)){
+      process.stdout.write("^");
+    }else{
+      process.stdout.write(".");
+    }
+  }
+  console.log();
 }
