@@ -113,7 +113,8 @@ function checkFormat(srcFiles: string[], baseArgs: string[]): Promise<boolean> {
                     .stdout; 
     out.setEncoding('utf8');
     out.on('data', (data: Buffer) => {
-      output += data;          
+      output += data;         
+      console.log(output) 
     });
     
     out.on('end', () => {
@@ -135,7 +136,6 @@ async function findFormatErrorLines(output: string){
     if(err){
       throw err;
     }
-
     if(xmlOutput['replacements']['replacement'] == undefined){
       return;
     }
@@ -144,38 +144,44 @@ async function findFormatErrorLines(output: string){
       arrOffset[i] = xmlOutput['replacements']['replacement'][i].$.offset;
       arrOffsetLength[i] = xmlOutput['replacements']['replacement'][i].$.length;
       i++;
-        
     }  
   });
 
   let buffer = '';
   let lines: string[] = [];
   const read = promisify(fs.readFile);
+  // *******TODO: How many files am I allowed to check*******
   let data = await read(process.argv[3], 'utf8');
   lines = data.split('\n');
 
-  let count = 0;
-  let arrCount = 0;
-  let charCount = 0;
+  let lineCount = 0;
   let prevCharCount = 0;
-  for(let i = 0; i < lines.length; i++){
-    count += +arrOffset[arrCount];
-    charCount += +lines[i].length;
-    if(count < charCount){
-      printFormatErrLines(lines[i], arrOffset[arrCount] - +prevCharCount, arrOffsetLength[arrCount]);
-      arrCount++; 
+  for(let i = 0; i < arrOffset.length;){
+    let offsetCount = arrOffset[i];
+    if(offsetCount < prevCharCount + +lines[lineCount].length){
+      printFormatErrLines(lines[lineCount], arrOffset[i] - +prevCharCount, arrOffsetLength[i]);
+      i++;  
+    }else{
+      prevCharCount += +lines[lineCount].length + +1;
+      lineCount++;
     }
-    prevCharCount += +lines[i].length + +1;
+    
   }
+
 }
 
 function printFormatErrLines(line: string, position: number, length: number){
-  console.log(line);
+  let header = process.argv[3] + ":" + "#";
+  let spacing = header.length + 1;
+  let empty = ' ';
+  process.stdout.write(header);
+  console.log(" " + line);
+  process.stdout.write(empty.repeat(spacing));
   for(let i = 0; i < line.length; i++){
     if(i >= position && i < (+position + +length)){
       process.stdout.write("^");
     }else{
-      process.stdout.write(".");
+      process.stdout.write("-");
     }
   }
   console.log();
