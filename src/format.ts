@@ -18,6 +18,7 @@ import * as path from 'path';
 import {Options} from './cli';
 import {createProgram} from './lint';
 import { promisify } from 'util';
+import { start } from 'repl';
 
 // Exported for testing purposes.
 export const clangFormat = require('clang-format');
@@ -62,7 +63,7 @@ export async function format(
   if (fix) {
     return fixFormat(srcFiles, baseClangFormatArgs);
   } else {
-    const result = await checkFormat(srcFiles, baseClangFormatArgs);
+    const result = await checkFormat(srcFiles, baseClangFormatArgs, options);
     if (!result) {
       options.logger.log(
           'clang-format reported errors... run `gts fix` to address.');
@@ -95,7 +96,7 @@ function fixFormat(srcFiles: string[], baseArgs: string[]): Promise<boolean> {
  *
  * @param srcFiles list of source files
  */
-function checkFormat(srcFiles: string[], baseArgs: string[]): Promise<boolean> {
+function checkFormat(srcFiles: string[], baseArgs: string[], options: Options): Promise<boolean> {
   return new Promise<boolean>((resolve, reject) => {
     let output = '';
     const arrOffset: number[] = [];
@@ -113,12 +114,12 @@ function checkFormat(srcFiles: string[], baseArgs: string[]): Promise<boolean> {
                     .stdout; 
     out.setEncoding('utf8');
     out.on('data', (data: Buffer) => {
-      output += data;         
-      
+      output += data;  
+      console.log(output)       
     });
     
     out.on('end', () => {
-      findFormatErrorLines(output)
+      findFormatErrorLines(output, options)
         .then(() => {
           resolve(output.indexOf('<replacement ') === -1 ? true : false);
         });
@@ -132,14 +133,14 @@ function checkFormat(srcFiles: string[], baseArgs: string[]): Promise<boolean> {
  * 
  * @param output xml string 
  */
-async function findFormatErrorLines(output: string){
+async function findFormatErrorLines(output: string, options: Options){
   const parser = new xml2js.Parser();
   const files = output.split('<?xml version=\'1.0\'?>\n');
 
   for(let i = 1; i < files.length; i++){
 
-    let arrOffset: number[] = [];
-    let arrOffsetLength: number[] = [];
+    let errOffset: number[] = [];
+    let errLength: number[] = [];
 
     parser.parseString(files[i], function(err: any, xmlOutput: any){
       if(err){
@@ -152,8 +153,8 @@ async function findFormatErrorLines(output: string){
 
       let j = 0;
       while(xmlOutput['replacements']['replacement'][j] !== undefined){
-        arrOffset[j] = xmlOutput['replacements']['replacement'][j].$.offset;
-        arrOffsetLength[j] = xmlOutput['replacements']['replacement'][j].$.length;
+        errOffset[j] = xmlOutput['replacements']['replacement'][j].$.offset;
+        errLength[j] = xmlOutput['replacements']['replacement'][j].$.length;
         j++;  
       }
     });
@@ -166,22 +167,47 @@ async function findFormatErrorLines(output: string){
 
     const data = await read(file, 'utf8');
     lines = data.split('\n');
+    let linesOfCharCount: number[] = []
+    linesOfCharCount[0] = 0;
+    for(let i = 1; i < lines.length; i++){
+      linesOfCharCount[i] = linesOfCharCount[i - 1] + lines[i - 1].length + 1;
+    }
 
-    let lineCount = 0;
+    /*console.log('linesOfCharCount: ' + linesOfCharCount);
+    console.log('errOffset: ' + errOffset);
+    console.log('errLength: ' + errLength)*/
     let prevCharCount = 0;
-    for(let i = 0; i < arrOffset.length;){
-      if(arrOffset[i] < prevCharCount + +lines[lineCount].length){
-        printFormatErrLines(lines[lineCount], arrOffset[i] - +prevCharCount, 
-            arrOffsetLength[i], lineCount + 1, file);
-        i++;  
+    for(let i = 0; i < errOffset.length;){
+      let startLine = findErrLine(file, errOffset[i], linesOfCharCount);
+      let endLine = findErrLine(file, +errOffset[i] + +errLength[i], linesOfCharCount);
+      if(startLine === endLine){
+        printFormatErrLines(lines[startLine], errOffset[i] - linesOfCharCount[startLine], 
+            errLength[i], startLine, file, options);
       }else{
-        prevCharCount += +lines[lineCount].length + +1;
-        lineCount++;
+        
+        printFormatErrLines(lines[startLine] + '\xB6' , errOffset[i] - linesOfCharCount[startLine], 
+            errOffset[i] + 1, startLine, file, options);
+        
+        if(startLine + 1 < endLine){
+          console.log(file + ":" + (startLine + 1) + "-" + (endLine - 1) + "   remove lines");
+        }
       }
+      i++;
+      
     }
   }
 }
 
+function findErrLine(file: string, offset: number, linesOfCharCount: number[]): number{
+  let left = 0;
+  let right = linesOfCharCount.length - 1;
+  for(let i = 1; i < linesOfCharCount.length; i++){
+    if(linesOfCharCount[i] >= offset){
+      return i - 1;
+    }
+  }
+  return 0;
+}
 
 /**
  * Prints the line with formatting issues.
@@ -193,7 +219,7 @@ async function findFormatErrorLines(output: string){
  * @param file the file where formatting issue is
  */
 function printFormatErrLines(line: string, pos: number, length: number, 
-    lineNumber: number, file: string){
+    lineNumber: number, file: string, options: Options){
   const header = file + ':' + lineNumber;
   const spacing = header.length + 3;
   process.stdout.write(header);
